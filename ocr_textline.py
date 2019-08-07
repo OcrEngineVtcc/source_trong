@@ -15,10 +15,10 @@ class OCR(object):
 
 		for textline in obj['text_lines']:
 			x, y, w, h = textline['x'], textline['y'], textline['w'], textline['h']
-			x_start = x - padding if x - padding > 0 else x
-			y_start = y - padding if y - padding > 0 else y
-			x_stop = x + w + padding if x + w + padding < image_width else x + w
-			y_stop = y + h + padding if y + h + padding < image_height else y + h
+			x_start = x - padding if x - padding > 0 else 0
+			y_start = y - padding if y - padding > 0 else 0
+			x_stop = x + w + padding if x + w + padding < image_width else image_width
+			y_stop = y + h + padding if y + h + padding < image_height else image_height
 			textline_image = image[y_start:y_stop, x_start:x_stop]
 
 			textline['text'] = pytesseract.image_to_string(textline_image, lang='vie', config='--psm 7 --oem 1')
