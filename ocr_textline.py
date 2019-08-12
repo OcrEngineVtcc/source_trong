@@ -4,6 +4,7 @@ import json
 import numpy as np
 import pytesseract
 from io import StringIO
+from word_box import box, _space_info, _trunc
 
 class OCR(object):
 	@staticmethod
@@ -19,24 +20,35 @@ class OCR(object):
 			x_start, y_start = start['x'], start['y']
 			x_stop, y_stop = stop['x'], stop['y']
 			textline_image = image[y_start:y_stop, x_start:x_stop]
+			left_trunc, right_trunc = _trunc(textline_image, axis=0)
+			space_info = _space_info(textline_image[:, left_trunc:right_trunc], axis=0)
+			if len(space_info) > 1:
+				space_info = np.asarray(space_info)
+				space_info = space_info[:, 1] - space_info[:, 0]
+				threshold_h = 2 * space_info.mean() * space_info.max() / (space_info.mean() + space_info.max())
+			else:
+				threshold_h = float('inf')
 
 			textline['text'] = pytesseract.image_to_string(textline_image, lang=lang, config='--psm 7 --oem 1')
 			
-			textline_tsv = StringIO(pytesseract.image_to_data(textline_image, lang=lang, config='--psm 7 --oem 1'))
-			textline_tsv = list(csv.reader(textline_tsv, delimiter='\t'))
+			textline_tsv = pytesseract.image_to_data(textline_image, lang=lang, config='--psm 7 --oem 1', output_type=pytesseract.Output.DICT)
 			words = []
-			for row in textline_tsv[1:]:
-				if row[-2] != '-1':
-					left = x_start + int(row[-6])
-					top = y_start + int(row[-5])
-					width, height = int(row[-4]), int(row[-3])
+			for i in range(len(textline_tsv['level'])):
+				if textline_tsv['conf'][i] != '-1':
+					left = left_trunc + x_start + textline_tsv['left'][i]
+					top = y_start + textline_tsv['top'][i]
+					width, height = textline_tsv['width'][i], textline_tsv['height'][i]
+					word_image = image[top:top + height, left:left + width]
+					left_box, top_box, right_box, bottom_box = box(word_image, threshold_h) if min(width, height) > 3 else (0, 0, width, height)
+					# left_box, top_box, right_box, bottom_box = (0, 0, width, height)
+
 					words.append({
-							'word': row[-1],
+							'word': textline_tsv['text'][i],
 							'word_coord': [
-											{'x': left, 'y': top}, 
-											{'x': left + width, 'y': top}, 
-											{'x': left + width, 'y': top + height}, 
-											{'x': left, 'y': top + height}
+											{'x': left + left_box, 'y': top + top_box}, 
+											{'x': left + right_box, 'y': top + top_box}, 
+											{'x': left + right_box, 'y': top + bottom_box}, 
+											{'x': left + left_box, 'y': top + bottom_box}
 										]
 						})
 			textline['words'] = words
