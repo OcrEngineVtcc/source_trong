@@ -28,7 +28,7 @@ class Evaluation(object):
 				x_start, y_start = coords.min(axis=0)
 				x_stop, y_stop = coords.max(axis=0)
 				# Append textline to the list
-				textlines.append({'x_start': x_start, 'y_start': y_start, 'x_stop': x_stop, 'y_stop': y_stop, 'text': text})
+				textlines.append({'x_start': x_start, 'y_start': y_start, 'x_stop': x_stop, 'y_stop': y_stop, 'text': text, 'processed': False})
 		return textlines
 
 	@staticmethod
@@ -51,16 +51,29 @@ class Evaluation(object):
 		return iou
 
 	@staticmethod
-	def _calc_accuracy(ocr_list):
+	def _calc_avg_textline_accuracy(ocr_list):
 		'''
 		Returns character and word accuracy calculated from pairs in ocr_list. Each pair is a dict having ground_truth and prediction keys.
 		'''
-		char_err, word_err, count = 0, 0, 0
+		char_err_rate, word_err_rate = 0, 0
 		for pair in ocr_list:
-			char_err += editdistance.eval(pair['ground_truth'], pair['prediction']) / len(pair['ground_truth'])
-			word_err += editdistance.eval(pair['ground_truth'].split(), pair['prediction'].split()) / len(pair['ground_truth'].split())
-			count += 1
-		char_accuracy, word_accuracy = 1 - char_err / count, 1 - word_err / count
+			char_err_rate += editdistance.eval(pair['ground_truth'], pair['prediction']) / max(len(pair['ground_truth']), len(pair['prediction']))
+			word_err_rate += editdistance.eval(pair['ground_truth'].split(), pair['prediction'].split()) / max(len(pair['ground_truth'].split()), len(pair['prediction'].split()))
+		char_accuracy, word_accuracy = 1 - char_err_rate / len(ocr_list), 1 - word_err_rate / len(ocr_list)
+		return char_accuracy, word_accuracy
+
+	@staticmethod
+	def _calc_avg_image_accuracy(ocr_list):
+		'''
+		Returns character and word accuracy calculated from pairs in ocr_list. Each pair is a dict having ground_truth and prediction keys.
+		'''
+		char_err, word_err, char_len, word_len = 0, 0, 0, 0
+		for pair in ocr_list:
+			char_err += editdistance.eval(pair['ground_truth'], pair['prediction'])
+			char_len += max(len(pair['ground_truth']), len(pair['prediction']))
+			word_err += editdistance.eval(pair['ground_truth'].split(), pair['prediction'].split())
+			word_len += max(len(pair['ground_truth'].split()), len(pair['prediction'].split()))
+		char_accuracy, word_accuracy = 1 - char_err / char_len, 1 - word_err / word_len
 		return char_accuracy, word_accuracy
 		
 	@staticmethod
@@ -83,7 +96,7 @@ class Evaluation(object):
 		return Evaluation._calc_accuracy(ocr_list)
 
 	@staticmethod
-	def prediction(json_path, bbox_path, lang='vie'):
+	def prediction(json_path, bbox_path, avg_textline=False):
 		'''
 		Returns character and word accuracy calculated from textline predictions in json file specified by json_path and bbox_path.
 		Args:
@@ -94,18 +107,20 @@ class Evaluation(object):
 		with open(json_path, mode='r') as f:
 			obj = json.load(f)
 
-		image = cv2.imread(obj['image_dir'])
 		ocr_list = []
 		textlines = Evaluation._textlines(bbox_path)
 		for textline in obj['text_lines']:
-			x, y, w, h = textline['x'], textline['y'], textline['w'], textline['h']
-			x_start, y_start, x_stop, y_stop = x, y, x + w, y + h
-			textline_image = image[y_start:y_stop, x_start:x_stop]
-
-			prediction_text = pytesseract.image_to_string(textline_image, lang='vie', config='--psm 7 --oem 1')
-
-			ground_truth_textline = max(textlines, key=lambda x: Evaluation._iou((x['x_start'], x['y_start'], x['x_stop'], x['y_stop']), (x_start, y_start, x_stop, y_stop)))
-			ground_truth_text = ground_truth_textline['text']
+			coord = textline['coordinates']
+			start = min(coord, key=lambda c: [c['x'], c['y']])
+			stop = max(coord, key=lambda c: [c['x'], c['y']])
+			ground_truth_textline = max(textlines, key=lambda x: Evaluation._iou((x['x_start'], x['y_start'], x['x_stop'], x['y_stop']), (start['x'], start['y'], stop['x'], stop['y'])))
+			ground_truth_text = ground_truth_textline['text'] if Evaluation._iou((ground_truth_textline['x_start'], ground_truth_textline['y_start'], ground_truth_textline['x_stop'], ground_truth_textline['y_stop']), (start['x'], start['y'], stop['x'], stop['y'])) != 0 else ''
+			ground_truth_textline['processed'] = True
+			prediction_text = textline['text']
 			ocr_list.append({'ground_truth': ground_truth_text, 'prediction': prediction_text})
+		
+		for textline in textlines:
+			if not textline['processed']:
+				ocr_list.append({'ground_truth': textline['text'], 'prediction': ''})
 
-		return Evaluation._calc_accuracy(ocr_list)
+		return Evaluation._calc_avg_textline_accuracy(ocr_list) if avg_textline else Evaluation._calc_avg_image_accuracy(ocr_list)

@@ -1,6 +1,7 @@
 import cv2
 import csv
 import json
+import numpy as np
 import pytesseract
 from io import StringIO
 
@@ -11,11 +12,12 @@ class OCR(object):
 			obj = json.load(f)
 
 		image = cv2.imread(obj['image_dir'])
-		image_height, image_width, _ = image.shape
 
 		for textline in obj['text_lines']:
-			x, y, w, h = textline['x'], textline['y'], textline['w'], textline['h']
-			x_start, y_start, x_stop, y_stop = x, y, x + w, y + h
+			start = min(textline['coordinates'], key=lambda c: [c['x'], c['y']])
+			stop = max(textline['coordinates'], key=lambda c: [c['x'], c['y']])
+			x_start, y_start = start['x'], start['y']
+			x_stop, y_stop = stop['x'], stop['y']
 			textline_image = image[y_start:y_stop, x_start:x_stop]
 
 			textline['text'] = pytesseract.image_to_string(textline_image, lang=lang, config='--psm 7 --oem 1')
@@ -28,8 +30,15 @@ class OCR(object):
 					left = x_start + int(row[-6])
 					top = y_start + int(row[-5])
 					width, height = int(row[-4]), int(row[-3])
-					words.append([row[-1], {'x': left, 'y': top, 'w': width, 'h':height}])
+					words.append({
+							'word': row[-1],
+							'word_coord': [
+											{'x': left, 'y': top}, 
+											{'x': left + width, 'y': top}, 
+											{'x': left + width, 'y': top + height}, 
+											{'x': left, 'y': top + height}
+										]
+						})
 			textline['words'] = words
-
-		with open(json_path, mode='w') as f:
+		with open(json_path.replace('.json', '_ocr.json'), mode='w') as f:
 			json.dump(obj, f)
