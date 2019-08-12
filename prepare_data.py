@@ -1,8 +1,9 @@
 import os
 import cv2
-import sys
 import shutil
+import random
 import natsort
+import argparse
 import numpy as np
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -82,12 +83,8 @@ class GenerateBox(DataTool):
 								box_file.write('{} {} {} {} {} {}\n'.format(label_text[i], 0, 0, width, height, 0))
 						box_file.write('{} {} {} {} {} {}\n'.format(label_text[-1], 0, 0, width, height, 0))
 						box_file.write('{} {} {} {} {} {}\n'.format('\t', 0, 0, width, height, 0))
-					shutil.copy(textline_image_path.__str__(), self.textline_label_folder_path.__str__())
-					shutil.copy(label_path.__str__(), self.textline_label_folder_path.__str__())
 
 	def scan(self):
-		self.textline_label_folder_path = self.data_folder_path.joinpath('textline_label')
-		self.textline_label_folder_path.mkdir()
 		textline_image_paths = natsort.natsorted(self.data_folder_path.glob('*{}'.format(self.image_extension)), key=lambda x : x.name)
 		label_paths = natsort.natsorted(self.data_folder_path.glob('*.txt'), key=lambda x : x.name)
 		for textline_image_path, label_path in zip(textline_image_paths, label_paths):
@@ -102,28 +99,40 @@ class GenerateLSTMF(DataTool):
 		os.system(cmd)
 
 	def scan(self):
+		textline_label_folder_path = self.data_folder_path.joinpath('textline_label')
+		textline_label_folder_path.mkdir()
 		image_paths = natsort.natsorted(self.data_folder_path.glob('*{}'.format(self.image_extension)), key=lambda x : x.name)
 		for image_path in image_paths:
 			self._generate_lstmf(image_path.__str__())
+			shutil.move(image_path.__str__(), textline_label_folder_path.__str__())
+			shutil.move(image_path.with_suffix('.box').__str__(), textline_label_folder_path.__str__())
 			print('{} done.'.format(image_path.name))
 
 class DivideDataset(DataTool):
-	def __init__(self, data_folder_path, train_ratio):
+	def __init__(self, data_folder_path, train_ratio, valid_ratio):
 		super(DivideDataset, self).__init__(data_folder_path, None)
 		self.dataset_path = self.data_folder_path.joinpath('dataset')
 		self.train_ratio = train_ratio
+		self.valid_ratio = valid_ratio
 	
 	def _divide(self):
-		train_list_path = self.data_folder_path.joinpath('train.list')
+		train_list_path = self.data_folder_path.joinpath('training.list')
+		valid_list_path = self.data_folder_path.joinpath('validation.list')
 		test_list_path = self.data_folder_path.joinpath('test.list')
 		lstmf_paths = list(self.dataset_path.glob('*.lstmf'))
+		random.shuffle(lstmf_paths)
 		train_lstmf_paths = lstmf_paths[:int(self.train_ratio * len(lstmf_paths))]
-		test_lstmf_paths = lstmf_paths[int(self.train_ratio * len(lstmf_paths)):]
+		valid_lstmf_paths = lstmf_paths[int(self.train_ratio * len(lstmf_paths)):int((self.train_ratio + self.valid_ratio) * len(lstmf_paths))]
+		test_lstmf_paths = lstmf_paths[int((self.train_ratio + self.valid_ratio) * len(lstmf_paths)):]
 
 		with train_list_path.open(mode='w') as f:
 			for path in train_lstmf_paths:
 				f.write('{}\n'.format(path.__str__()))
 		
+		with valid_list_path.open(mode='w') as f:
+			for path in valid_lstmf_paths:
+				f.write('{}\n'.format(path.__str__()))
+
 		with test_list_path.open(mode='w') as f:
 			for path in test_lstmf_paths:
 				f.write('{}\n'.format(path.__str__()))
@@ -132,27 +141,57 @@ class DivideDataset(DataTool):
 		self._divide()
 
 if __name__ == '__main__':
-	data_folder_path, image_extension, train_ratio = sys.argv[1:]
-	data_folder_path = Path(data_folder_path)
-	crop_textline = CropTextline(data_folder_path.__str__(), image_extension)
-	generate_box = GenerateBox(data_folder_path.__str__(), '.tif')
-	generate_lstmf = GenerateLSTMF(data_folder_path.__str__(), '.tif')
-	divide_dataset = DivideDataset(data_folder_path.__str__(), float(train_ratio))
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--data-path', type=str, required=True, help='path to folder containing images and bbox files')
+	parser.add_argument('--image-extension', type=str, default='.jpg', help='image extension')
+	parser.add_argument('--train-ratio', type=float, default=0.64, help='training ratio')
+	parser.add_argument('--valid-ratio', type=float, default=0.16, help='validation ratio')
+	parser.add_argument('--fine-turning', action='store_true', default=False, help='fine-turning or not')
+	parser.add_argument('--train-from-scratch', action='store_true', default=False, help='train from scratch or not')
 
-	crop_textline.scan()
-	generate_box.scan()
-	generate_lstmf.scan()
+	args = parser.parse_args()
 
-	dataset_path, image_label_box_path = data_folder_path.joinpath('dataset'), data_folder_path.joinpath('image_label_path')
-	dataset_path.mkdir()
+	data_folder_path = Path(args.data_path)
 
-	textline_image_paths, label_paths, box_paths, lstmf_paths = data_folder_path.glob('*.tif'), data_folder_path.glob('*.txt'), data_folder_path.glob('*.box'), data_folder_path.glob('*.lstmf')
+	if args.fine_turning:
+		os.system('wget -P {} https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/master/vie.traineddata'.format(data_folder_path.__str__()))
+		os.system('combine_tessdata -e {} {}'.format(data_folder_path.joinpath('vie.traineddata').__str__(), data_folder_path.joinpath('vie.lstm').__str__()))
+	elif args.train_from_scratch:
+		all_textline_path = data_folder_path.joinpath('all_textline.txt')
+		os.system('wget -P {} https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/master/Latin.unicharset'.format(data_folder_path.__str__()))
+		os.system('wget -P {} https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/master/radical-stroke.txt'.format(data_folder_path.__str__()))
+		os.system('wget -P {} https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/master/vie/vie.unicharset'.format(data_folder_path.__str__()))
+		os.system('cat {} > {}'.format(data_folder_path.joinpath('textline_label').__str__(), all_textline_path.__str__()))
+		os.system('combine_lang_model --input_unicharset {} --script_dir {} --output_dir {} --lang vie'.format(data_folder_path.joinpath('vie.unicharset').__str__(), data_folder_path.__str__(), data_folder_path.__str__()))
+		all_textline_path.unlink()
+		data_folder_path.joinpath('Latin.unicharset').unlink()
+		data_folder_path.joinpath('radical-stroke.txt').unlink()
+		data_folder_path.joinpath('vie.unicharset').unlink()
+		shutil.copy(data_folder_path.joinpath('vie', 'vie.traineddata').__str__(), data_folder_path.__str__())
+		shutil.rmtree(data_folder_path.joinpath('vie').__str__())
+	else:
+		crop_textline = CropTextline(data_folder_path.__str__(), args.image_extension)
+		generate_box = GenerateBox(data_folder_path.__str__(), '.tif')
+		generate_lstmf = GenerateLSTMF(data_folder_path.__str__(), '.tif')
+		divide_dataset = DivideDataset(data_folder_path.__str__(), float(args.train_ratio), float(args.valid_ratio))
 
-	for textline_image_path, label_path, box_path in zip(textline_image_paths, label_paths, box_paths):
-		textline_image_path.unlink()
-		label_path.unlink()
-		box_path.unlink()
-	for lstmf_path in lstmf_paths:
-		shutil.move(lstmf_path.__str__(), dataset_path.__str__())
+		crop_textline.scan()
+		generate_box.scan()
+		generate_lstmf.scan()
 
-	divide_dataset.scan()
+		dataset_path, image_label_box_path = data_folder_path.joinpath('dataset'), data_folder_path.joinpath('image_label_path')
+		checkpoint_folder_path, model_folder_path = data_folder_path.joinpath('checkpoints'), data_folder_path.joinpath('model_output')
+
+		dataset_path.mkdir()
+		checkpoint_folder_path.mkdir()
+		model_folder_path.mkdir()
+
+		box_paths, lstmf_paths = data_folder_path.glob('*.txt'), data_folder_path.glob('*.lstmf')
+
+		for box_path in box_paths:
+			box_path.unlink()
+
+		for lstmf_path in lstmf_paths:
+			shutil.move(lstmf_path.__str__(), dataset_path.__str__())
+
+		divide_dataset.scan()
