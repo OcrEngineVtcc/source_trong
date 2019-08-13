@@ -35,20 +35,29 @@ class OCR(object):
 			words = []
 			for i in range(len(textline_tsv['level'])):
 				if textline_tsv['conf'][i] != '-1':
-					left = left_trunc + x_start + textline_tsv['left'][i]
+					left = x_start + textline_tsv['left'][i]
 					top = y_start + textline_tsv['top'][i]
-					width, height = textline_tsv['width'][i], textline_tsv['height'][i]
-					word_image = image[top:top + height, left:left + width]
-					left_box, top_box, right_box, bottom_box = box(word_image, threshold_h) if min(width, height) > 3 else (0, 0, width, height)
+					right = left + textline_tsv['width'][i]
+					bottom = top + textline_tsv['height'][i]
+					coord = [{'x': left, 'y': top}, {'x': right, 'y': top}, {'x': right, 'y': bottom}, {'x': left, 'y': bottom}]
+					if i < len(textline_tsv['level']) - 1:
+						left_after = x_start + textline_tsv['left'][i + 1]
+						top_after = y_start + textline_tsv['top'][i + 1]
+						right_after = left_after + textline_tsv['width'][i + 1]
+						bottom_after = top_after + textline_tsv['height'][i + 1]
+						coord_after = [{'x': left_after, 'y': top_after}, {'x': right_after, 'y': top_after}, {'x': right_after, 'y': bottom_after}, {'x': left_after, 'y': bottom_after}] if min(right_after - left_after, bottom_after - top_after) > 3 else None
+					else:
+						coord_after = None
+					left_box, top_box, right_box, bottom_box = box(image, coord, threshold_h, coord_after) if min(right - left, bottom - top) > 3 else (left, top, right, bottom)
 					# left_box, top_box, right_box, bottom_box = (0, 0, width, height)
 
 					words.append({
 							'word': textline_tsv['text'][i],
 							'word_coord': [
-											{'x': left + left_box, 'y': top + top_box}, 
-											{'x': left + right_box, 'y': top + top_box}, 
-											{'x': left + right_box, 'y': top + bottom_box}, 
-											{'x': left + left_box, 'y': top + bottom_box}
+											{'x': left_box, 'y': top_box}, 
+											{'x': right_box, 'y': top_box}, 
+											{'x': right_box, 'y': bottom_box}, 
+											{'x': left_box, 'y': bottom_box}
 										]
 						})
 			textline['words'] = words
