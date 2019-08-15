@@ -18,8 +18,8 @@ class OCR(object):
 			x_stop, y_stop = stop['x'], stop['y']
 			textline_image = image[y_start:y_stop, x_start:x_stop]
 
-			textline['text'] = pytesseract.image_to_string(textline_image, lang=lang, config='--psm 7 --oem 1')
-			textline_tsv = pytesseract.image_to_data(textline_image, lang=lang, config='--psm 7 --oem 1', output_type=pytesseract.Output.DICT)
+			textline['text'] = pytesseract.image_to_string(textline_image, lang=lang, config='--psm 6 --oem 1')
+			textline_tsv = pytesseract.image_to_data(textline_image, lang=lang, config='--psm 6 --oem 1', output_type=pytesseract.Output.DICT)
 			words = []
 			for i in range(len(textline_tsv['level'])):
 				if textline_tsv['conf'][i] != '-1':

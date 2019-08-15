@@ -7,14 +7,20 @@ class WordBox(object):
 	@staticmethod
 	def _space_info(image, axis, cutoff=False):
 		image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+		image_gray = cv2.normalize(image_gray, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+		image_gray = np.power(np.abs(image_gray), 2.5)
+		image_gray = cv2.normalize(image_gray, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+
 		image_inv = cv2.adaptiveThreshold(image_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 15, 15)
+
 		profile = image_inv.sum(axis=axis, dtype=int)
 		if cutoff:
 			threshold = profile.mean()
 			profile[profile < threshold] = 0
 		profile = np.append(profile, 1) # append an arbitrary non-zero number
+		
 		num_zero, start, stop = [], 0, 0
-
 		for i in range(len(profile) - 1):
 			if profile[i] != 0 and profile[i + 1] == 0:
 				start = i + 1
@@ -72,10 +78,10 @@ class WordBox(object):
 		left, right = 0, word_image_trunc.shape[1]
 		if len(spaces) == 1:
 			if mode is None:
-				if spaces[0][0] < word_image_trunc.shape[1] - spaces[0][1]:
-					left, right = spaces[0][1], word_image_trunc.shape[1]
-				else:
+				if spaces[0][0] > 2 * (word_image_trunc.shape[1] - spaces[0][1]):
 					left, right = 0, spaces[0][0]
+				else:
+					left, right = spaces[0][1], word_image_trunc.shape[1]
 			if mode == 'r':
 				left, right = spaces[0][1], word_image_trunc.shape[1]
 			elif mode == 'l':
@@ -98,11 +104,6 @@ class WordBox(object):
 		start = min(coord, key=lambda c: [c['x'], c['y']])
 		stop = max(coord, key=lambda c: [c['x'], c['y']])
 		word_image = image[start['y']:stop['y'], start['x']:stop['x']]
-		# space_info = WordBox._space_info(word_image, axis=1, cutoff=True)
-		# space_info.insert(0, [0, 0])
-		# space_info.append([word_image.shape[0], word_image.shape[0]])
-		# non_space = [space_info[i + 1][0] - space_info[i][1] for i in range(len(space_info) - 1)]
-		# threshold_v = max(non_space) * 0.28
 
 		top, bottom = WordBox._split_vertical(image, coord, WordBox._threshold_v(word_image))
 		coord[0]['y'] = top
@@ -115,7 +116,6 @@ class WordBox(object):
 	@staticmethod
 	def box(image, coord, threshold_h, coord_after=None):
 		left, top, right, bottom = WordBox._box(image, coord, threshold_h, mode=None)
-		print(left, top, right, bottom)
 		if coord_after is not None:
 			after_l = WordBox._box(image, coord_after, threshold_h, mode='l')
 			after_r = WordBox._box(image, coord_after, threshold_h, mode=None)
@@ -123,7 +123,6 @@ class WordBox(object):
 				top = after_l[1] if after_l[1] < top else top
 				bottom = after_l[3] if after_l[3] > bottom else bottom
 				right = after_l[2]
-		print(left, top, right, bottom)
 		return left, top, right, bottom
 
 	@staticmethod
@@ -134,8 +133,6 @@ class WordBox(object):
 		image = cv2.imread(obj['image_dir'])
 
 		for i, textline in enumerate(obj['text_lines']):
-			if i != 278:
-				continue
 			start = min(textline['coordinates'], key=lambda c: [c['x'], c['y']])
 			stop = max(textline['coordinates'], key=lambda c: [c['x'], c['y']])
 			textline_image = image[start['y']:stop['y'], start['x']:stop['x']]
@@ -143,14 +140,6 @@ class WordBox(object):
 			
 			top_trunc, bottom_trunc = WordBox._trunc(textline_image, axis=1)
 			textline_image = textline_image[top_trunc: bottom_trunc]
-			cv2.imshow('Image', textline_image)
-			cv2.waitKey()
-			cv2.destroyAllWindows()
-			# space_info = WordBox._space_info(textline_image, axis=1, cutoff=True)
-			# space_info.insert(0, [0, 0])
-			# space_info.append([textline_image.shape[0], textline_image.shape[0]])
-			# non_space = [space_info[i + 1][0] - space_info[i][1] for i in range(len(space_info) - 1)]
-			# threshold_v = max(non_space) * 0.3
 			textline_top, textline_bottom = WordBox._split_vertical(image, textline_coord, WordBox._threshold_v(textline_image))
 			space_info = WordBox._space_info(image[textline_top:textline_bottom, start['x']:stop['x']], axis=0)
 			if len(space_info) > 1:
@@ -170,10 +159,10 @@ class WordBox(object):
 				if coord_after:
 					coord_after_start = min(coord_after, key=lambda c: [c['x'], c['y']])
 					coord_after_stop = max(coord_after, key=lambda c: [c['x'], c['y']])
-					if min(coord_after_stop['x'] - coord_after_start['x'], coord_after_stop['y'] - coord_after_start['y']) < 4:
+					if min(coord_after_stop['x'] - coord_after_start['x'], coord_after_stop['y'] - coord_after_start['y']) < 3:
 						coord_after = None
 				try:
-					left, top, right, bottom = WordBox.box(image, coord, threshold_h, coord_after) if min(coord_stop['x'] - coord_start['x'], coord_stop['y'] - coord_start['y']) > 4 else (coord_start['x'], coord_start['y'], coord_stop['x'], coord_stop['y'])
+					left, top, right, bottom = WordBox.box(image, coord, threshold_h, coord_after) if min(coord_stop['x'] - coord_start['x'], coord_stop['y'] - coord_start['y']) > 3 else (coord_start['x'], coord_start['y'], coord_stop['x'], coord_stop['y'])
 				except:
 					left, top, right, bottom = coord_start['x'], coord_start['y'], coord_stop['x'], coord_stop['y']
 				words[i]['word_coord'] = [{'x': left, 'y': top}, {'x': right, 'y': top}, {'x': right, 'y': bottom}, {'x': left, 'y': bottom}]
