@@ -37,6 +37,8 @@ class WordBox(object):
 		else:
 			left = space_info[0][1] if space_info[0][0] == 0 else 0
 			right = space_info[-1][0] if space_info[-1][1] == image.shape[1 - axis] else image.shape[1 - axis]
+		if left >= right:
+			left, right = 0, image.shape[1 - axis]
 		return left, right
 
 	@staticmethod
@@ -62,7 +64,8 @@ class WordBox(object):
 				bottom = spaces[0][0]
 		elif len(spaces) == 2:
 			top, bottom = spaces[0][1], spaces[1][0]
-
+		if start['y'] + top_trunc + top >= start['y'] + top_trunc + bottom:
+			return start['y'], stop['y']
 		return start['y'] + top_trunc + top, start['y'] + top_trunc + bottom
 	
 	@staticmethod
@@ -86,7 +89,8 @@ class WordBox(object):
 				left, right = spaces[0][1], word_image_trunc.shape[1]
 			elif mode == 'l':
 				left, right = 0, spaces[0][0]
-
+		if start['x'] + left_trunc + left >= start['x'] + left_trunc + right:
+			return start['x'], stop['x']
 		return start['x'] + left_trunc + left, start['x'] + left_trunc + right
 
 	@staticmethod
